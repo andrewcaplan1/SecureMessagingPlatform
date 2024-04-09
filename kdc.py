@@ -11,9 +11,6 @@ def parse_arguments():
     return parser.parse_args()
 
 
-
-
-
 # Function to handle LIST command
 def list_command(server, client_addr, clients):
     online_users = list(clients.keys())
@@ -25,7 +22,6 @@ def list_command(server, client_addr, clients):
 
 # Function to handle MESSAGE command
 # def message_command(server, message, client_address, clients):
-
 
 
 # Main function to handle incoming messages
