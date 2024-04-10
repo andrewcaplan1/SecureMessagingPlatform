@@ -1,4 +1,4 @@
 {
-  "KDC_HOST": "192.169.0.1",
-  "KDC_PORT": 88
+  "KDC_HOST": "localhost",
+  "KDC_PORT": 5001
 }

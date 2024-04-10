@@ -21,7 +21,11 @@ class Client:
         self.password = hashes.Hash(hashes.SHA256())
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.server_sock.connect((host, port))
-        self.sign_in()
+        self.server_sock.send(json.dumps({'type': 'SIGN-IN', 'user': self.username}).encode('utf-8'))
+        self.server_sock.send(json.dumps({'type': 'SIGN-IN', 'user': self.username}).encode('utf-8'))
+
+
+        # self.sign_in()
 
     # Called at initialization. Signs into the server with this client's username.
     def sign_in(self):
@@ -80,14 +84,11 @@ class Client:
 
     def run_client(self):
 
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        client_socket.connect(('localhost', 0))
-        client_port = client_socket.getsockname()[1]
-        client_port = client_socket.getsockname()[1]
 
 
 
-        print(f"Client port: {client_port}")
+
+        # print(f"Client port: {client_port}")
 
         # Login
         message = {'type': 'login',
@@ -95,30 +96,34 @@ class Client:
                    'destination': '',
                    'content': 'login'}
 
-        # start receiving messages from other clients (make sure they are authenticated with us)
-        receive_message_thread = threading.Thread(target=receive_messages, args=(client_socket,), daemon=True)
-        receive_message_thread.start()
-
-        # after logging in, the user can list users or send messages
         while True:
             command = input("+> ")
-            if command == 'list':
-                print("Executing 'list' command")
-                # FIXME: Call function to list users
-                # Send LIST command
-            elif command.startswith('send'):
-                # Parse send command
-                _, recipient, content = command.split(' ', 2)
-                # Send MESSAGE command
-                # send(client_socket, addr, message)
-            else:
-                print("Invalid command or syntax. Please use 'list' or 'send <user> <message>'.")
+            self.send(command)
+
+        # # start receiving messages from other clients (make sure they are authenticated with us)
+        # receive_message_thread = threading.Thread(target=self.receive_messages, args=(client_socket,), daemon=True)
+        # receive_message_thread.start()
+        #
+        # # after logging in, the user can list users or send messages
+        # while True:
+        #     command = input("+> ")
+        #     if command == 'list':
+        #         print("Executing 'list' command")
+        #         # FIXME: Call function to list users
+        #         # Send LIST command
+        #     elif command.startswith('send'):
+        #         # Parse send command
+        #         _, recipient, content = command.split(' ', 2)
+        #         # Send MESSAGE command
+        #         # send(client_socket, addr, message)
+        #     else:
+        #         print("Invalid command or syntax. Please use 'list' or 'send <user> <message>'.")
 
 
 if __name__ == "__main__":
     username = input("Enter your username:")
     password = input("Enter your password:")
-    with open('server_info.json') as f:
+    with open('config.json') as f:
         server_info = json.load(f)
 
     client = Client(server_info["KDC_HOST"], server_info["KDC_PORT"], username, password)
