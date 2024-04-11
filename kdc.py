@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-import argparse
-import socket
 import json
 import selectors
+import socket
 import types
 
 
 class KDC:
 
     def __init__(self, host, port):
-        self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_sock.bind((host, port))
-
+        self.server_sock.listen()
         # return data immediately, used to manage multi connections
         self.server_sock.setblocking(False)
 
         # use selectors module to manage multiple client connections
         self.sel = selectors.DefaultSelector()
+
         # register this as a listening socket, monitor with sel.select()
         self.sel.register(self.server_sock, selectors.EVENT_READ)
 
@@ -31,7 +31,7 @@ class KDC:
     def run_server(self):
         try:
             while True:
-                client_requests = self.sel.select(timeout=None)
+                client_requests = self.sel.select(timeout=1)
                 # loop through sockets
                 for key, mask in client_requests:
                     if key.data is None:
@@ -65,29 +65,38 @@ class KDC:
         c_socket.setblocking(False)
         c_data = key.data
 
+        if c_data:
+            print("data", c_data)
+
         # ready to read data from client
         if mask & selectors.EVENT_READ:
             recv_data = c_socket.recv(1024)
 
             # received no data --> bail out because client closed socket
             if not recv_data:
+                print(f"Closing connection to {c_data.addr}")
                 self.sel.unregister(c_socket)
                 c_socket.close()
             else:
                 json_data = json.loads(recv_data.decode('utf-8'))
+                print(json_data)
                 response = json.dumps(self.delegate_request(c_socket, json_data)).encode('utf-8')
                 c_data.outb += response
 
     # What is the query asking? Respond accordingly and tell the user if the action is
     # successful or not.
     def delegate_request(self, c_socket, json_request):
-        src_usr = json_request['user']
-        print(f"Received request '{json_request['action']}' from '{src_usr}'")
-        if json_request['action'] == 'SIGN-IN':
+        src_usr = json_request['source']
+        # print(f"Received request '{json_request['action']}' from '{src_usr}'")
+        if json_request['type'] == 'SIGN-IN':
             if src_usr in self.user_socks:
                 self.send_json(src_usr, 'OK', 'Already signed in')
             else:
-                self.sign_in(c_socket, json_request)
+                self.user_socks[src_usr] = c_socket
+                self.user_auth_states[src_usr] = 'init-auth-req'
+                response = {'status': 'hello', 'message': 'world'}
+                c_socket.send(json.dumps(response).encode('utf-8'))
+                # self.sign_in(c_socket, json_request)
         else:
             # ERROR if client tries to do an action before signing in
             if src_usr not in self.user_socks:
