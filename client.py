@@ -126,7 +126,7 @@ class Client:
                    'destination': '',
                    'content': 'login'}
 
-        print(message)
+        # print(message)
         # self.init_sock.send(json.dumps({'type': 'SIGN-IN', 'source': self.username}).encode('utf-8'))
         # self.init_sock.send(json.dumps({'type': 'SIGN-IN', 'source': self.username}).encode('utf-8'))
         # self.server_sock.send(json.dumps(message).encode('utf-8'))

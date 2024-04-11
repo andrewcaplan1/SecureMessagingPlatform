@@ -65,9 +65,6 @@ class KDC:
         c_socket.setblocking(False)
         c_data = key.data
 
-        if c_data:
-            print("data", c_data)
-
         # ready to read data from client
         if mask & selectors.EVENT_READ:
             recv_data = c_socket.recv(1024)
