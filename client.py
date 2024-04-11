@@ -16,19 +16,27 @@ message = {'type': ['SIGN-IN', 'MESSAGE_AUTH' 'LIST', 'MESSAGE'],
 
 class Client:
 
-    def __init__(self, host, port, user, pw):
+    def __init__(self, server_host, server_port, user, pw):
         self.username = user
         self.password = hashes.Hash(hashes.SHA256())
-        self.server_addr = (host, port)
+        # create TCP socket for talking to server
+        self.server_addr = (server_host, server_port)
+        self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_sock.connect(self.server_addr)
+
+        # create UDP socket for sending to other clients
+        self.friend_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+
+        # create UDP socket for receiving data from other clients
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.client_sock.connect(self.server_addr)
-        self.client_sock.connect()
+        self.client_sock.bind((UDP_IP, UDP_PORT))
         self.sign_in()
 
     # Called at initialization. Signs into the server with this client's username.
     def sign_in(self):
         sign_in_request = {'type': 'SIGN-IN', 'user': self.username}
-        self.client_sock.send(json.dumps(sign_in_request).encode('utf-8'))
+        self.server_sock.dumps(sign_in_request).encode('utf-8'))
         sign_in_response = self.receive()
 
         if sign_in_response:
@@ -53,7 +61,7 @@ class Client:
         input_tokens = user_input.split()
         if len(input_tokens) > 0:
             if input_tokens[0] == "list":
-                self.client_sock.send(json.dumps({'type': 'LIST', 'user': self.username})
+                self.server_sock.send(json.dumps({'type': 'LIST', 'user': self.username})
                                       .encode('utf-8'))
 
             elif input_tokens[0] == "send":
@@ -63,7 +71,7 @@ class Client:
                            'user': self.username,
                            'dst_usr': input_tokens[1],
                            'message': msg_content}
-                self.client_sock.send(json.dumps(message).encode('utf-8'))
+                self.server_sock.send(json.dumps(message).encode('utf-8'))
             else:
                 print("ERROR: Unrecognized command")
                 # re-prompt...
@@ -74,7 +82,7 @@ class Client:
         print("Receiving message...")
         while True:
             try:
-                data = self.client_sock.recv(4096)
+                data = self.server_sock.recv(4096)
                 message = json.loads(data.decode('utf-8'))
                 return message['content']
             except socket.timeout:
@@ -88,8 +96,8 @@ class Client:
                    'source': '',
                    'destination': '',
                    'content': 'login'}
-        self.client_sock.send(json.dumps({'type': 'SIGN-IN', 'user': self.username}).encode('utf-8'))
-        self.client_sock.send(json.dumps({'type': 'SIGN-IN', 'user': self.username}).encode('utf-8'))
+        self.server_sock.send(json.dumps({'type': 'SIGN-IN', 'user': self.username}).encode('utf-8'))
+        self.server_sock.send(json.dumps({'type': 'SIGN-IN', 'user': self.username}).encode('utf-8'))
         # self.server_sock.send(json.dumps(message).encode('utf-8'))
         receive_message_thread = threading.Thread(target=self.receive_messages, daemon=True)
         receive_message_thread.start()

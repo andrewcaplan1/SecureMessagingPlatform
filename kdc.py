@@ -21,6 +21,7 @@ class KDC:
         self.sel.register(self.server_sock, selectors.EVENT_READ)
 
         self.user_socks = {}  # map of user to socket
+        # FIXME (with the labels for each step)
         self.user_auth_states = {}  # map of user to authentication status ["authenticated", "unauthenticated"]
 
         print("KDC Server Initialized...")
@@ -128,9 +129,6 @@ class KDC:
         response = {'type': 'LIST', 'content': message_to_send}
 
         self.server_sock.sendto(json.dumps(response).encode(), client_addr)
-
-    # Function to handle MESSAGE command
-    # def message_command(server, message, client_address, clients):
 
 
 if __name__ == "__main__":
