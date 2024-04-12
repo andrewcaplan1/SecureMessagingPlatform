@@ -4,23 +4,14 @@ import selectors
 import socket
 import types
 
+from node import Node
 
-class KDC:
+
+class KDC(Node):
 
     def __init__(self, host, port):
-        self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_sock.bind((host, port))
-        self.server_sock.listen()
-        # return data immediately, used to manage multi connections
-        self.server_sock.setblocking(False)
+        super().__init__(host, port)
 
-        # use selectors module to manage multiple client connections
-        self.sel = selectors.DefaultSelector()
-
-        # register this as a listening socket, monitor with sel.select()
-        self.sel.register(self.server_sock, selectors.EVENT_READ)
-
-        self.user_socks = {}  # map of user to socket
         # FIXME (with the labels for each step)
         self.user_auth_states = {}  # map of user to authentication status ["authenticated", "unauthenticated"]
 
@@ -45,19 +36,6 @@ class KDC:
         finally:
             # close all sockets
             self.sel.close()
-
-    # Called when server receives a new incoming connection. Stores the socket in the
-    # selectors registry.
-    def register_client(self, c_socket):
-        connect, address = c_socket.accept()
-        print(f"Received connection from {address}")
-        connect.setblocking(False)  # to avoid BlockingIOError
-
-        # wrap data in SimpleNamespace class
-        data = types.SimpleNamespace(addr=address, inb=b"", outb=b"")
-        # we use bitwise OR because we want to know when conn is ready for reading and writing
-        events = selectors.EVENT_READ | selectors.EVENT_WRITE
-        self.sel.register(connect, events, data=data)
 
     # Read the client's query and respond accordingly.
     def service_client(self, key, mask):
