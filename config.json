@@ -1,4 +1,6 @@
 {
   "KDC_HOST": "localhost",
-  "KDC_PORT": 5001
+  "KDC_PORT": 5001,
+  "CLIENT_PORT": 0,
+  "CLIENT_HOST": "localhost"
 }

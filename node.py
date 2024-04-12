@@ -1,12 +1,16 @@
 # Called when server receives a new incoming connection. Stores the socket in the
 # selectors registry.
+import json
 import selectors
+import time
 import types
 import socket
 
 
 class Node:
-    def __init__(self, listen_host, listen_port):
+    def __init__(self, listen_host, listen_port, user_id):
+
+        self.username = user_id
 
         # TCP socket for listening for new connections
         self.listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -33,3 +37,15 @@ class Node:
         # we use bitwise OR because we want to know when conn is ready for reading and writing
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         self.sel.register(connect, events, data=data)
+
+    def send(self, dest_sock, msg_type, content, protocol_step=""):
+        json_request = {
+            'type': msg_type,
+            'step': protocol_step,
+            'src': self.username,
+            'dest': dest_sock.getsockname(),
+            'time': time.time(),
+            'content': content
+        }
+        print(f"Sending message: {json_request}")
+        dest_sock.send(json.dumps(json_request).encode('utf-8'))

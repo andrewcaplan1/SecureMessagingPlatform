@@ -3,9 +3,8 @@ import math
 import selectors
 import socket
 import json
-import time
-
-from cryptography.hazmat.primitives import hashes
+# import cryptography
+# from cryptography.hazmat.primitives import hashes
 
 from node import Node
 
@@ -21,8 +20,7 @@ from node import Node
 class Client(Node):
 
     def __init__(self, client_host, client_port, server_host, server_port, user, pw):
-        super().__init__(client_host, client_port)
-        self.username = user
+        super().__init__(client_host, client_port, user)
         self.password = pw
 
         # TCP socker for communicating with the KDC
@@ -33,7 +31,7 @@ class Client(Node):
     def sign_in(self):
 
         # FIXME: replace content with SPEKE or SRP
-        self.send(self.listen_sock, self.server_sock, 'SIGN-IN', 'Diffie Helman')
+        self.send(self.server_sock, 'SIGN-IN', 'Diffie Helman')
 
         sign_in_response = self.receive_messages()
 
@@ -47,18 +45,6 @@ class Client(Node):
         else:
             print("Server failed to sign in with unknown server error")
 
-    def send(self, src_sock, dest_sock, msg_type, content):
-        src_sock_info = src_sock.getpeername()
-        json_request = {
-            'type': msg_type,
-            'src': f'{src_sock_info[0]}:{src_sock_info[1]}:{self.username}',
-            'dest': dest_sock.getsockname(),
-            'time': time.time(),
-            'content': content
-        }
-        print(f"Sending message: {json_request}")
-        dest_sock.send(json.dumps(json_request).encode('utf-8'))
-
     def receive(self):
         packet_raw = self.server_sock.recv(1024)
         if packet_raw:
@@ -68,12 +54,13 @@ class Client(Node):
             return None
 
     def speke(self, password):
-        digest = hashes.Hash(hashes.SHA256())
-        digest.update(password)
-        pass_hash = digest.finalize()
-        # https://datatracker.ietf.org/doc/rfc3526/?include_text=1
-        p = int(2 ** 2048 - 2 ** 1984 - 1 + 2 ^ 64 * ((2 ** 1918 * math.pi) + 124476))
-        g = (pass_hash ** 2) % p  # same as pow(pass_hash, 2, p)
+        # digest = hashes.Hash(hashes.SHA256())
+        # digest.update(password)
+        # pass_hash = digest.finalize()
+        # # https://datatracker.ietf.org/doc/rfc3526/?include_text=1
+        # p = int(2 ** 2048 - 2 ** 1984 - 1 + 2 ^ 64 * ((2 ** 1918 * math.pi) + 124476))
+        # g = (pass_hash ** 2) % p  # same as pow(pass_hash, 2, p)
+        pass
 
     # Function to handle incoming messages
     def receive_messages(self):
@@ -105,7 +92,27 @@ class Client(Node):
         finally:
             # close all sockets
             self.sel.close()
-            self.listen_sock.close()
+            # self.listen_sock.close()
+
+    # Read the client's query and respond accordingly.
+    def service_client(self, key, mask):
+        c_socket = key.fileobj
+        c_socket.setblocking(False)
+        c_data = key.data
+
+        # ready to read data from client
+        if mask & selectors.EVENT_READ:
+            recv_data = c_socket.recv(1024)
+
+            # received no data --> bail out because client closed socket
+            if not recv_data:
+                self.sel.unregister(c_socket)
+                c_socket.close()
+            else:
+                json_data = json.loads(recv_data.decode('utf-8'))
+                # response = json.dumps(self.delegate_request(c_socket, json_data)).encode('utf-8')
+                # c_data.outb += response
+                print(json_data)
 
 
 if __name__ == "__main__":
@@ -114,10 +121,10 @@ if __name__ == "__main__":
     with open('config.json') as f:
         config_file = json.load(f)
 
-    client = Client(config_file["KDC_HOST"],
-                    config_file["KDC_PORT"],
-                    config_file["CLIENT_HOST"],
+    client = Client(config_file["CLIENT_HOST"],
                     config_file["CLIENT_PORT"],
+                    config_file["KDC_HOST"],
+                    config_file["KDC_PORT"],
                     username,
                     password)
     client.run_client()
