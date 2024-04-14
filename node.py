@@ -12,6 +12,11 @@ from cryptography.hazmat.primitives import hashes
 p = 1299827
 
 
+# are the times within 5 minutes of each other?
+def valid_time(time1, time2):
+    return 300 > math.abs(time1 - time2)
+
+
 class Node:
     def __init__(self, listen_host, listen_port, user_id):
         self.username = user_id
@@ -42,25 +47,47 @@ class Node:
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         self.sel.register(connect, events, data=data)
 
-    def send(self, dest_sock, msg_type, content, protocol_step=""):
+    def send(self, dest_sock, msg_type, **content):
         json_request = {
             'type': msg_type,
             'step': protocol_step,
             'src': self.username,
             'dest': dest_sock.getsockname(),
-            'time': time.time(),
-            'content': content
         }
+        for label, value in content:
+            json_request[label] = value
         print(f"Sending message: {json_request}")
         dest_sock.send(json.dumps(json_request).encode('utf-8'))
 
     # SPEKE!
     def half_diffie_hellman(self, password, random):
         digest = hashes.Hash(hashes.SHA256())
-        digest.update(password)
-        pass_hash = int(digest.finalize())
+        digest.update(password.encode('utf-8'))
+        pass_hash = int.from_bytes(digest.finalize(), 'big')
         # https://datatracker.ietf.org/doc/rfc3526/?include_text=1
         # p = int(2 ** 2048 - 2 ** 1984 - 1 + 2 ^ 64 * ((2 ** 1918 * math.pi) + 124476))
         # g = (pass_hash ** 2) % p  # same as pow(pass_hash, 2, p)
-        w = pow(pass_hash, 2, p)
-        return pow(w, random, p)
+        g = pow(pass_hash, 2, p)  # hash(w)^2 mod p
+        return pow(g, random, p)  # g^a mod p
+
+    def encrypt(self, init_vector, key, content):
+        # encrypt plaintext with symmetric key
+        cipher = Cipher(algorithms.AES(key), modes.CBC(init_vector))
+        encryptor = cipher.encryptor()
+
+        # need paddings b/c CBC mode needs data to be a multiple of the block length (128)
+        padder = padding.PKCS7(128).padder()
+        padded_pt = padder.update(content)
+        padded_pt += padder.finalize()
+        ciphertext = encryptor.update(padded_pt) + encryptor.finalize()
+        return ciphertext
+
+    def decrypt(self, init_vector, key, ciphertext):
+        # decrypt ciphertext with symmetric key
+        cipher = Cipher(algorithms.AES(key), modes.CBC(init_vector))
+        decryptor = cipher.decryptor()
+        padded_text = decryptor.update(ciphertext) + decryptor.finalize()
+        unpadder = padding.PKCS7(128).unpadder()
+        unpadded_pt = unpadder.update(padded_text)
+        unpadded_pt += unpadder.finalize()
+        return unpadded_pt

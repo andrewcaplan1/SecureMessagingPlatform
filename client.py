@@ -3,7 +3,6 @@ import math
 import selectors
 import socket
 import json
-# import cryptography
 import os
 import subprocess
 import sys
@@ -33,45 +32,72 @@ class Client(Node):
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_sock.connect((server_host, server_port))
 
-        self.kdc_key = None
+        self.tgt = None  # ticket-granting-ticket
+        self.keys = {}  # map from user/kdc to shared key
 
     # Signs into the server with this client's username.
     def sign_in(self):
-        dh_private = int(os.urandom(2048))
-        half_key = self.half_diffie_hellman(self.password, dh_private)
+        # int.frombytes(os.urandom(2048), 'big')
+        dh_private = int.from_bytes(os.urandom(2048), 'big')  # a
+        half_key = self.half_diffie_hellman(self.password, dh_private)  # g^a mod p
         self.send(self.server_sock, 'SIGN-IN', half_key, protocol_step='init-auth-req')
 
-        sign_in_response = self.receive()
+        sign_in_response = self.receive(self.server_sock)
         if sign_in_response and sign_in_response['protocol_step'] == 'init-auth-resp':
             # computing the shared session key
-            self.kdc_key = pow(sign_in_response['content'], dh_private, p)
+            self.keys['kdc'] = pow(sign_in_response['content'], dh_private, p)
         else:
             print("Did not receive SIGN-IN response from server")
             sys.exit(1)
         # FIXME: encrypt timestamp with the shared key
-        challenge = self.encrypt(self.kdc_key, time.time())  # encrypts timestamp with session key
-        self.send(self.server_sock, 'SIGN-IN', challenge, protocol_step='init-chal-1')
+        challenge = self.encrypt(self.keys['kdc'], time.time())  # encrypts timestamp with session key
+        self.send(self.server_sock, 'SIGN-IN', time=challenge, protocol_step='init-chal-1')
         # FIXME: should entire message be encrypted or just challenge?
-    def encrypt(self, key, content):
-        # encrypt plaintext with symmetric key
-        init_vector = os.urandom(16)
-        cipher = Cipher(algorithms.AES(key), modes.CBC(init_vector))
-        encryptor = cipher.encryptor()
 
-        # need paddings b/c CBC mode needs data to be a multiple of the block length (128)
-        padder = padding.PKCS7(128).padder()
-        padded_pt = padder.update(content)
-        padded_pt += padder.finalize()
-        ciphertext = encryptor.update(padded_pt)
-        return ciphertext
-
-    def receive(self):
-        packet_raw = self.server_sock.recv(1024)
+    def receive(self, socket):
+        packet_raw = socket.recv(1024)
         if packet_raw:
-            packet_json = json.loads(packet_raw.decode())
-            return packet_json
+            return json.loads(packet_raw.decode())
         else:
             return None
+
+    def process_command(self, user_input):
+        parsed_input = user_input.split()
+        command = parsed_input[0]
+        if command == 'LIST':
+            # FIXME: should list
+            self.send(self.server_sock, 'list')
+        elif command == 'MESSAGE':
+            dest_user = parsed_input[1]
+            if dest_user in self.user_socks:
+                # already authenticated with dest user, so we can send message directly
+                self.send(self.user_socks[dest_user], 'message', ' '.join(parsed_input[2:]))
+                # FIXME: ' '.join erases the user's existing whitespace characters
+            else:
+                self.send(self.server_sock, 'message-auth', [dest_user, self.tgt])
+                kdc_resp = self.receive(self.server_sock)
+                if kdc_resp:
+                    raw_resp = self.decrypt(kdc_resp['iv'], self.keys['kdc'], kdc_resp['content'])
+                    json_resp = json.loads(raw_resp)
+                    if valid_time(json_resp['time'], time.time()):
+                        if kdc_resp['type'] == 'message-auth':
+                            ticket = kdc_resp['ticket']
+                            shared_key = kdc_resp['key']
+                            shared_key_dest = kdc_resp['key_user']
+                            friend_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            friend_sock.connect((kdc_resp['host'], kdc_resp['port']))
+                            self.send(friend_sock, '')
+                            # FIXME: make sure that shared_key_dest is the same as dest_user
+                        else:
+                            # FIXME: add better error handling... what to do when unexpected response type?
+                            pass
+                    else:
+                        # FIXME: invalid timestamp, should we try again or ignore?
+                        print("Received message with outdated timestamp")
+                else:
+                    print("KDC is unresponsive")
+        else:
+            print(f"Huh? Workstation does not recognize the command {command}")
 
     def run_client(self):
         self.sign_in()
@@ -79,7 +105,7 @@ class Client(Node):
 
         try:
             while True:
-                command = input("Enter command (list or message:")
+                # command = input_stream.readline()
                 client_requests = self.sel.select(timeout=None)
                 # loop through sockets
                 for key, mask in client_requests:
@@ -130,7 +156,7 @@ if __name__ == "__main__":
                     config_file["KDC_PORT"],
                     username,
                     password)
-    client.run_client()
+    client.run_client(sys.stdin)
 
 # client.py
 # ~client automatically chooses open port~

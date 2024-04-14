@@ -11,8 +11,15 @@ def test_simple():
     kdc = KDC(LOCAL_HOST, KDC_PORT)
     alice = Client(LOCAL_HOST, ALICE_PORT, LOCAL_HOST, KDC_PORT,
                    'alice', 'supersecurepassword')
-    alice.sign_in()
     bob = Client(LOCAL_HOST, BOB_PORT, LOCAL_HOST, KDC_PORT,
                  'bob', 'bobisthebest')
-    bob.sign_in()
+
+    kdc.run_server()
+    alice_input = ""
+    alice.run_client(alice_input)
+
+    bob_input = ""
+    bob.run_client(bob_input)
+
+
 
