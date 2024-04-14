@@ -1,15 +1,19 @@
 # Called when server receives a new incoming connection. Stores the socket in the
 # selectors registry.
 import json
+import os
 import selectors
 import time
 import types
 import socket
 
+from cryptography.hazmat.primitives import hashes
+
+p = 1299827
+
 
 class Node:
     def __init__(self, listen_host, listen_port, user_id):
-
         self.username = user_id
 
         # TCP socket for listening for new connections
@@ -49,3 +53,14 @@ class Node:
         }
         print(f"Sending message: {json_request}")
         dest_sock.send(json.dumps(json_request).encode('utf-8'))
+
+    # SPEKE!
+    def half_diffie_hellman(self, password, random):
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(password)
+        pass_hash = int(digest.finalize())
+        # https://datatracker.ietf.org/doc/rfc3526/?include_text=1
+        # p = int(2 ** 2048 - 2 ** 1984 - 1 + 2 ^ 64 * ((2 ** 1918 * math.pi) + 124476))
+        # g = (pass_hash ** 2) % p  # same as pow(pass_hash, 2, p)
+        w = pow(pass_hash, 2, p)
+        return pow(w, random, p)

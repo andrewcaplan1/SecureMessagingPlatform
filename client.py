@@ -4,9 +4,15 @@ import selectors
 import socket
 import json
 # import cryptography
-# from cryptography.hazmat.primitives import hashes
+import os
+import subprocess
+import sys
+import time
 
-from node import Node
+from cryptography.hazmat.primitives import hashes, padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+from node import Node, p
 
 
 #
@@ -27,23 +33,37 @@ class Client(Node):
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_sock.connect((server_host, server_port))
 
+        self.kdc_key = None
+
     # Signs into the server with this client's username.
     def sign_in(self):
+        dh_private = int(os.urandom(2048))
+        half_key = self.half_diffie_hellman(self.password, dh_private)
+        self.send(self.server_sock, 'SIGN-IN', half_key, protocol_step='init-auth-req')
 
-        # FIXME: replace content with SPEKE or SRP
-        self.send(self.server_sock, 'SIGN-IN', 'Diffie Helman')
-
-        sign_in_response = self.receive_messages()
-
-        if sign_in_response:
-            print(sign_in_response)
-            # if 'ERROR' == sign_in_response['status']:
-            #     print('Failed to sign in with error from server: ' + sign_in_response['message'])
-            #     exit(1)
-            # else:
-            print(f"Signed in as '{self.username}'")
+        sign_in_response = self.receive()
+        if sign_in_response and sign_in_response['protocol_step'] == 'init-auth-resp':
+            # computing the shared session key
+            self.kdc_key = pow(sign_in_response['content'], dh_private, p)
         else:
-            print("Server failed to sign in with unknown server error")
+            print("Did not receive SIGN-IN response from server")
+            sys.exit(1)
+        # FIXME: encrypt timestamp with the shared key
+        challenge = self.encrypt(self.kdc_key, time.time())  # encrypts timestamp with session key
+        self.send(self.server_sock, 'SIGN-IN', challenge, protocol_step='init-chal-1')
+        # FIXME: should entire message be encrypted or just challenge?
+    def encrypt(self, key, content):
+        # encrypt plaintext with symmetric key
+        init_vector = os.urandom(16)
+        cipher = Cipher(algorithms.AES(key), modes.CBC(init_vector))
+        encryptor = cipher.encryptor()
+
+        # need paddings b/c CBC mode needs data to be a multiple of the block length (128)
+        padder = padding.PKCS7(128).padder()
+        padded_pt = padder.update(content)
+        padded_pt += padder.finalize()
+        ciphertext = encryptor.update(padded_pt)
+        return ciphertext
 
     def receive(self):
         packet_raw = self.server_sock.recv(1024)
@@ -53,31 +73,13 @@ class Client(Node):
         else:
             return None
 
-    def speke(self, password):
-        # digest = hashes.Hash(hashes.SHA256())
-        # digest.update(password)
-        # pass_hash = digest.finalize()
-        # # https://datatracker.ietf.org/doc/rfc3526/?include_text=1
-        # p = int(2 ** 2048 - 2 ** 1984 - 1 + 2 ^ 64 * ((2 ** 1918 * math.pi) + 124476))
-        # g = (pass_hash ** 2) % p  # same as pow(pass_hash, 2, p)
-        pass
-
-    # Function to handle incoming messages
-    def receive_messages(self):
-        print("Receiving message...")
-        while True:
-            try:
-                data = self.server_sock.recv(4096)
-                message = json.loads(data.decode('utf-8'))
-                return message
-            except socket.timeout:
-                continue
-
     def run_client(self):
         self.sign_in()
+        print(f"Signed in as '{self.username}'")
 
         try:
             while True:
+                command = input("Enter command (list or message:")
                 client_requests = self.sel.select(timeout=None)
                 # loop through sockets
                 for key, mask in client_requests:
@@ -98,7 +100,8 @@ class Client(Node):
     def service_client(self, key, mask):
         c_socket = key.fileobj
         c_socket.setblocking(False)
-        c_data = key.data
+        # FIXME: need this?
+        # c_data = key.data
 
         # ready to read data from client
         if mask & selectors.EVENT_READ:
@@ -110,9 +113,9 @@ class Client(Node):
                 c_socket.close()
             else:
                 json_data = json.loads(recv_data.decode('utf-8'))
-                # response = json.dumps(self.delegate_request(c_socket, json_data)).encode('utf-8')
-                # c_data.outb += response
-                print(json_data)
+                socket_info = c_socket.getpeername()
+                print(f"<From {socket_info[0]}:{socket_info[1]}:{json_data['src']}>: "
+                      f"{json_data['content']}")
 
 
 if __name__ == "__main__":

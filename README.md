@@ -45,12 +45,12 @@ WS forgets W, a
 WS solves challenge C1
 WS creates Challenge 2 (C2), and stores it
 
-Init-chall-resp-1
+Init-chal-resp-1
 WS → KDC: SA-KDC{C1, C2, timestamp}
 
 —————————
 
-KDC receives Init-chall-resp
+KDC receives Init-chal-resp
 
 KDC validates C1 challenge response
 KDC solves challenge C2
