@@ -32,29 +32,14 @@ To see this program in action, run ...
 2. `./client.py` and sign in with Andrew's credentials.
 3. `./client.py` and sign in with Amanda's credentials.
 
-Message types recognized by the KDC:
-
-- SIGN-IN, for client authentication
-- LIST, for listing online users
-- MSG-AUTH, for establishing shared client keys
-- MESSAGE, for sending messages between clients
-
 ## Known Issues
 
-- issue with [p, 2-p] small something attack from wikipedia
-- if client-client messages are received out of order, destination user won't receive ticket-to-B
+- issue with [p, 2-p] small something attack from [wikipedia](https://en.wikipedia.org/wiki/SPEKE)
 - if implementing client registration, need to make sure no one can register with the name 'kdc'
+-
 - trying to message a person who is not online?
 
-Authentication Steps
-
-client starts up
-put username and password
-WS calculates W and stores it
-WS chooses a and stores it
-
-- Expirations for session keys are created and sent but no implementation yet to actually check validity, but assume
-  that they would be given more time for the assignment
+- Expirations for session keys are created and sent but no implementation yet to check validity
 
 ## Protocol
 
@@ -70,7 +55,7 @@ Assume that the KDC has a list of registered users and their hashed passwords.
 - W is Alice's password
 - g is SHA-256(W)<sup>2</sup>
 
-—————————
+### Steps
 
 1. init-auth-req
    WS —> KDC : A, W<sup>a</sup> mod p
@@ -94,3 +79,15 @@ Message other clients
    KDC -> WS: Ticket-to-B, S<sub>A-KDC</sub>{B, timestamp, K<sub>AB</sub>, K<sub>AB</sub>-Expiration}
 3. message
    WS -> B: Ticket-to-B, S<sub>AB</sub>{message, timestamp}
+
+### Message Types
+
+Message types recognized by the KDC and clients:
+
+- SIGN-IN, for client authentication
+- LIST, for listing online users
+- MSG-AUTH, for establishing shared client keys
+
+Message type that is only recognized by the clients for client-client communication:
+
+- MESSAGE, for sending messages between clients

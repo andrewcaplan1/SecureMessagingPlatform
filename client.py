@@ -143,8 +143,7 @@ class Client(Node):
                 # check that we actually have a TGT to get Ticket-to-client
                 if not self.tgt or not self.tgt_iv:
                     print("No ticket-granting-ticket available, authentication failed")
-                    # FIXME: maybe try to sign in again?
-                    return
+                    return self.reset_login()
 
                 # encrypt list of destination user and timestamp with KDC shared key
                 encrypted_list, enc_iv = self.encrypt_list([dest_user, time.time()], self.keys['kdc'][0])
@@ -180,10 +179,9 @@ class Client(Node):
 
                             self.send(dest_sock, 'MSG-REQ', ttb=kdc_resp['ttb'], ttb_iv=kdc_resp['ttb_iv'],
                                       message=enc_msg, message_iv=msg_iv)
-                            # FIXME: make sure that shared_key_dest is the same as dest_user
                         else:
-                            # FIXME: invalid timestamp, should we try again or ignore?
-                            print("Received message with outdated timestamp, ignoring...")
+                            print("Received message with outdated timestamp, trying again...")
+                            return self.process_command(user_input)
                 else:
                     print("KDC is unresponsive")
         else:
@@ -220,25 +218,13 @@ class Client(Node):
     def service_client(self, key, mask):
         c_socket = key.fileobj
         c_socket.setblocking(False)
-        # FIXME: need this?
-        c_data = key.data
 
         # ready to read data from client
         if mask & selectors.EVENT_READ:
             recv_data = c_socket.recv(1024)
-
-            # received no data --> bail out because client closed socket
-            if not recv_data:
-                # print(f"Closing connection to {c_data.addr}")
-                # self.sel.unregister(c_socket)
-                # c_socket.close()
-                pass
-            else:
+            if recv_data:
                 json_data = json.loads(recv_data.decode('utf-8'))
                 self.delegate_request(c_socket, json_data)
-                # socket_info = c_socket.getpeername()
-                # print(f"<From {socket_info[0]}:{socket_info[1]}:{json_data['src']}>: "
-                #       f"{json_data['content']}")
 
     def delegate_request(self, c_socket, json_request):
         # if we are receiving a new message request from another client
@@ -250,11 +236,10 @@ class Client(Node):
                                                                                          self.keys['kdc'][0])
 
             bytes_shared_key = base64.standard_b64decode(shared_key)
-            # print("TICKET-TO-ME: shared-key: ", shared_key, "\nbytes_shared_key", bytes_shared_key)
 
             # check if ticket-to-me is valid, and if shared key is still valid
             if self.check_time(ttb_exp) and self.check_time(shared_key_exp, timeout=3000):
-                # FIXME: check if shared_key is expired
+                # TODO: check if shared_key is expired
                 # store shared key in keys dict
                 self.keys[ttb_user] = (bytes_shared_key, shared_key_exp)
 
@@ -270,6 +255,7 @@ class Client(Node):
 
                     # display message
                     print(f"<From {msg_user}>: {message}")
+
         if json_request['type'] == 'MESSAGE':
             # decrypt message
             message, iv = json_request['message'], json_request['iv']
@@ -280,7 +266,9 @@ class Client(Node):
             if json_request['src'] in self.keys and self.keys[json_request['src']][0]:
                 decrypted_message = self.decrypt(base64_iv, self.keys[json_request['src']][0], base64_message).decode(
                     'utf-8')
-                print(f"Received message: {decrypted_message}")
+                
+                # print received message
+                print(f"<From {json_request['src']}>: {decrypted_message}")
 
 
 if __name__ == "__main__":

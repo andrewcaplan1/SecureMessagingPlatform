@@ -14,8 +14,7 @@ class KDC(Node):
     def __init__(self, host, port):
         super().__init__(host, port, "KDC")
 
-        # FIXME (with the labels for each step)
-        self.user_info = {}  # map of user to authentication status ["authenticated", "unauthenticated"]
+        self.user_info = {}
         # user_info example:
         # {
         #     "address": "(user_host, user_port)",
@@ -73,19 +72,16 @@ class KDC(Node):
             # received no data --> bail out because client closed socket
             if not recv_data:
                 print(f"Closing connection to {c_data.addr}")
-                # FIXME: remove username from user_info, don't want to grant others ttb's
                 self.sel.unregister(c_socket)
                 c_socket.close()
             else:
                 received_json_data = json.loads(recv_data.decode('utf-8'))
-                # print(received_json_data)
                 self.delegate_request(c_socket, received_json_data)
 
     # What is the query asking? Respond accordingly and tell the user if the action is
     # successful or not.
     def delegate_request(self, c_socket, json_request):
         src_usr = json_request['src']
-        # print(f"KDC received request '{json_request['type']}' from '{src_usr}'")
 
         # handle sign-in request
         if json_request['type'] == 'SIGN-IN':
@@ -95,9 +91,7 @@ class KDC(Node):
             elif json_request['protocol_step'] == 'init-chal-resp':
                 self.challenge_response(c_socket, src_usr, json_request)
             else:
-                print("Bad SIGN-IN protocol step, exiting....")
-                # FIXME: ignore instead of exit?
-                sys.exit(1)
+                self.send(c_socket, 'ERROR', content='Bad SIGN-IN protocol step')
 
         # handle message-auth request
         elif json_request['type'] == 'MSG-AUTH':
@@ -127,16 +121,12 @@ class KDC(Node):
 
     # TGT --> ticket-to-B
     def message_auth(self, c_socket, tgt, tgt_iv, content, content_iv, src_usr):
-        # [src_usr, c_socket.getpeername(), time.time() + 3000]
         tgt_list = self.decrypt_list(tgt, tgt_iv, self.master_key)
-        # print(tgt_list)
 
         # check tgt for validity
         if tgt_list[0] != src_usr:
-            # print("tgt username does not match src_usr")
             self.send(c_socket, 'ERROR', content='tgt username does not match src_usr')
         elif tgt_list[1] != list(c_socket.getpeername()):
-            # print("tgt address does not match client address")
             self.send(c_socket, 'ERROR', content='tgt address does not match client address')
         elif tgt_list[2] < time.time():
             print("tgt expired")
@@ -159,7 +149,6 @@ class KDC(Node):
 
                 kab_expiration = time.time() + 3000
 
-                # [username, sender_address, expiration of ttb, session_key Kab, expiration Kab]
                 ttb = [src_usr, self.user_info[src_usr]["address"], time.time() + 300, base64_session_key_ab,
                        kab_expiration]
                 encrypted_ttb, ttb_iv = self.encrypt_list(ttb, self.user_info[dest_user]['shared_key'])
@@ -234,8 +223,8 @@ class KDC(Node):
     def challenge_response(self, c_socket, src_usr, json_request):
         # get shared key
         if src_usr not in self.user_info:
-            print("User has not begun authentication process, restart and try again")
-            # sys.exit(1)
+            self.send(c_socket, 'ERROR',
+                      content='User has not begun authentication process, restart and try again')
         elif (self.user_info[src_usr]["last_step_received"] == "init-auth-req"
               and json_request['protocol_step'] == "init-chal-resp"):
 

@@ -24,7 +24,6 @@ class Node:
         self.listen_sock.bind((listen_host, listen_port))
         # return data immediately, used to manage multi connections
         self.listen_sock.setblocking(False)
-        # FIXME: does this block?
         self.listen_sock.listen()
 
         # use selectors module to manage multiple peer connections
