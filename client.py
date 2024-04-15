@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import base64
+import io
 
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -32,13 +33,14 @@ class Client(Node):
         # TCP socker for communicating with the KDC
         self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_sock.connect((server_host, server_port))
-        self.inputs = [sys.stdin, self.server_sock]
 
         self.tgt = None  # ticket-granting-ticket
         self.keys = {}  # map from user/kdc to shared key
 
-        # FIXME: does this work to monitor user input to workstation?
         self.sel.register(sys.stdin, selectors.EVENT_READ)
+
+        self.tgt = None
+        self.tgt_iv = None
 
     # Signs into the server with this client's username.
     def sign_in(self):
@@ -84,8 +86,8 @@ class Client(Node):
 
         # decrypt tgt response
         if tgt_response and tgt_response['protocol_step'] == 'init-final':
-            tgt = tgt_response['tgt']
-            tgt_iv = tgt_response['tgt_iv']
+            self.tgt = tgt_response['tgt'] # this is base64 encoded because its straight from sent msg
+            self.tgt_iv = tgt_response['tgt_iv']
             timestamp_challenge = tgt_response['time']
             timestamp_challenge_iv = tgt_response['iv']
 
@@ -112,11 +114,25 @@ class Client(Node):
             return None
 
     def process_command(self, user_input):
-        parsed_input = user_input.split()
+
+        # print(user_input)
+        # while os.stat(user_input.fileno()).st_size != 0:
+        cmd = user_input.readline().strip()
+
+        # stuff = os.read(user_input.fileno(), 1)
+        # if not stuff:
+        #     return
+        # if not user_input:
+        #     # print("No input received")
+        #
+        #     return
+        # print(stuff)
+        parsed_input = cmd.split(' ', 2)
+        print("parsed input: ", parsed_input)
         command = parsed_input[0]
         print(command)
         if command == 'LIST':
-            self.send(self.server_sock, 'list')
+            self.send(self.server_sock, 'LIST')
             resp = self.receive(self.server_sock)
             if resp:
                 print(f"Signed In Users: {', '.join(resp['users'])}")
@@ -126,11 +142,23 @@ class Client(Node):
             dest_user = parsed_input[1]
             if dest_user in self.user_socks:
                 # already authenticated with dest user, so we can send message directly
-                self.send(self.user_socks[dest_user], 'message', ' '.join(parsed_input[2:]))
-                # FIXME: ' '.join erases the user's existing whitespace characters
+                self.send(self.user_socks[dest_user], 'message', parsed_input[2])
             else:
-                self.send(self.server_sock, 'message-auth', [dest_user, self.tgt])
+
+                # check that we actually have a TGT to get Ticket-to-client
+                if not self.tgt or not self.tgt_iv:
+                    print("No ticket-granting-ticket available")
+                    # FIXME: maybe try to sign in again?
+                    return
+
+                # encrypt list of destination user and timestamp with KDC shared key
+                encrypted_list = self.encrypt_list([dest_user, time.time()], self.keys['kdc'])
+
+                # send message-auth request to KDC
+                self.send(self.server_sock, 'MSG-AUTH', content=encrypted_list, tgt=self.tgt, tgt_iv=self.tgt_iv)
+
                 kdc_resp = self.receive(self.server_sock)
+
                 if kdc_resp:
                     raw_resp = self.decrypt(kdc_resp['iv'], self.keys['kdc'], kdc_resp['content'])
                     json_resp = json.loads(raw_resp)
@@ -161,11 +189,14 @@ class Client(Node):
         try:
             while True:
                 # command = input_stream.readline()
+
                 client_requests = self.sel.select(timeout=None)
                 # loop through sockets
                 for key, mask in client_requests:
-                    if type(key.fileobj) is _io.TextIOWrapper:
-                        self.process_command(key.data)
+                    # print(type(key.fileobj))
+                    if isinstance(key.fileobj, io.TextIOWrapper):
+                    # if type() is io.TextIOWrapper:
+                        self.process_command(key.fileobj)
                     elif key.data is None:
                         # found new client from server's listening socket --> accept connection
                         self.register_client(key.fileobj)
@@ -202,8 +233,8 @@ class Client(Node):
 
 
 if __name__ == "__main__":
-    username = input("Enter your username:")
-    password = input("Enter your password:")
+    username = input("Enter your username: ")
+    password = input("Enter your password: ")
     with open('config.json') as f:
         config_file = json.load(f)
 

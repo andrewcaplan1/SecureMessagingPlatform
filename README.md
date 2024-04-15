@@ -6,10 +6,15 @@ List of valid message types:
 - SIGN-IN
 - MESSAGE
 
+users:
+Andrew: HardPassword123
+Amanda: PasswordHard321
+
 
 Known Issues
 - issue with [p, 2-p] small something attack from wikipedia
 - if client-client messages are received out of order, destination user won't receive ticket-to-B
+- if implementing client registration, need to make sure no one can register with the name 'kdc'
 
 Authentication Steps
 

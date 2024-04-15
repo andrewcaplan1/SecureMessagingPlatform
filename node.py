@@ -46,21 +46,30 @@ class Node:
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         self.sel.register(connect, events, data=data)
 
+    def encrypt_list(self, plain_list, key):
+        iv = os.urandom(16)
+        content = str(plain_list)
+        encrypted = self.encrypt(iv, key, content.encode('utf-8'))
+        return encrypted, iv
+
+    def decrypt_list(self, encrypted_list, iv, key):
+        encrypted_list_bytes = base64.standard_b64decode(encrypted_list)
+        iv_bytes = base64.standard_b64decode(iv)
+        decrypted_plain_list = self.decrypt(iv_bytes, key, encrypted_list_bytes).decode('utf-8')
+        return json.loads(decrypted_plain_list)
+
     def send(self, dest_sock, msg_type, **content):
         json_request = {
             'type': msg_type,
             'src': self.username,
             'dest': dest_sock.getsockname(),
         }
-        # print(content)
         for label, value in content.items():
             if isinstance(value, bytes):
                 if label == 'tgt':
                     print("TGT was byte and now encoded base64")
-                # print("Encoding to bytes: ", label, value)
                 json_request[label] = base64.standard_b64encode(value).decode('utf-8')
             else:
-                # print("not bytes: ", label, value)
                 json_request[label] = value
         print(f"Sending message: {json_request}")
         dest_sock.send(json.dumps(json_request).encode('utf-8'))
@@ -107,8 +116,12 @@ class Node:
         plaintext = unpadder.update(padded_bytes) + unpadder.finalize()
         return plaintext
 
+    def check_time(self, ts):
+        return 300 > abs(ts - time.time())
+
     def decrypt_check_time(self, iv, challenge, key):
         iv_bytes = base64.standard_b64decode(iv)
         challenge_bytes = base64.standard_b64decode(challenge)
         decrypted_timestamp = self.decrypt(iv_bytes, key, challenge_bytes)
-        return 300 > abs(int.from_bytes(decrypted_timestamp, 'big') - int(time.time()))
+        # return 300 > abs(int.from_bytes(decrypted_timestamp, 'big') - int(time.time()))
+        return self.check_time(int.from_bytes(decrypted_timestamp, 'big'))

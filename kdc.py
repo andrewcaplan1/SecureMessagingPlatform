@@ -103,7 +103,8 @@ class KDC(Node):
         elif json_request['type'] == 'MSG-AUTH':
             # checks if user is authenticated already
             if src_usr in self.user_info and self.user_info[src_usr]["status"] == "authenticated":
-                self.message_auth(json_request['tgt'], json_request['tgt_iv'], json_request['iv'], json_request)
+                self.message_auth(c_socket, json_request['tgt'], json_request['tgt_iv'], json_request['iv'],
+                                  json_request['content'], src_usr)
             else:
                 self.send(c_socket, 'ERROR', content='Must authenticate first')
 
@@ -120,21 +121,58 @@ class KDC(Node):
         # return response
 
     # TGT --> ticket-to-B
-    def message_auth(self, tgt, tgt_iv, shared_iv, json_request):
+    def message_auth(self, c_socket, tgt, tgt_iv, shared_iv, content, src_usr):
 
-        tgt_bytes = base64.standard_b64decode(tgt)
-        tgt_iv_bytes = base64.standard_b64decode(tgt_iv)
-        tgt_text = self.decrypt(tgt_iv_bytes, self.master_key, tgt_bytes)
-        print(tgt_text)
-        tgt_list = list(tgt_text.decode('utf-8'))
+        # tgt_bytes = base64.standard_b64decode(tgt)
+        # tgt_iv_bytes = base64.standard_b64decode(tgt_iv)
+        # tgt_text = self.decrypt(tgt_iv_bytes, self.master_key, tgt_bytes).decode('utf-8')
+        # [src_usr, c_socket.getpeername(), time.time() + 3000]
+        tgt_list = self.decrypt_list(tgt, tgt_iv, self.master_key)
         print(tgt_list)
-        # FIXME: check tgt expiration
+
+        # check tgt for validity
+        if tgt_list[0] != src_usr:
+            print("tgt username does not match src_usr")
+            self.send(c_socket, 'ERROR', content='tgt username does not match src_usr')
+        elif tgt_list[1] != c_socket.getpeername():
+            print("tgt address does not match client address")
+            self.send(c_socket, 'ERROR', content='tgt address does not match client address')
+        elif tgt_list[2] < time.time():
+            print("tgt expired")
+            self.send(c_socket, 'ERROR', content='tgt expired')
+        else:
+            # tgt is ok
+            dest_user, timestamp = self.decrypt_list(content, shared_iv, self.user_info[src_usr]['shared_key'])
+
+            # check if user is authenticated
+            if self.user_info[dest_user]['status'] != 'authenticated':
+                self.send(c_socket, 'ERROR', content='Target user has not registered yet')
+            # check if timestamp is valid
+            elif not self.check_time(timestamp):
+                print('Timestamp expired')
+                self.send(c_socket, 'ERROR', content='message timestamp bad')
+            else:
+                # create ticket-to-B
+                session_key_ab = os.urandom(32)
+                kab_expiration = time.time() + 3000
+
+                # [username, sender_address, expiration of ttb, session_key Kab, expiration Kab]
+                ttb = [src_usr, c_socket.getpeername(), time.time() + 300, session_key_ab, kab_expiration]
+                encrypted_ttb, ttb_iv = self.encrypt_list(ttb, self.user_info[dest_user]['shared_key'])
+
+                key_info = [dest_user, self.user_info[dest_user]['address'], session_key_ab,
+                            kab_expiration, time.time()]
+
+                encrypted_key_info, key_info_iv = self.encrypt_list(key_info,
+                                                                    self.user_info[src_usr]['shared_key'])
+
+                self.send(c_socket, 'MSG-AUTH', ttb=ttb, ttb_iv=ttb_iv, key_info=encrypted_key_info,
+                          key_info_iv=key_info_iv)
 
         # KDC validates TGT (also makes sure B is logged in and authenticated)
         # KDC creates new session key KAB between A and B
         # SB-KDC {A, timestamp, ticket-to-B-expiration, KAB, KAB-expiration}
         # KDC → WS: Ticket-to-B=SB-KDC{A, TS, TTB-Expiration, KAB, KAB-Expiration}, SA-KDC{B, TS, KAB-Expiration, KAB}
-        pass
 
     def get_user_pw_hash(self, user):
         with open('kdc_database.json', "r") as jsonFile:
@@ -148,7 +186,7 @@ class KDC(Node):
             # TODO: delete this password thingy
             print("user not in database, making their password HardPasssord123")
             digest = hashes.Hash(hashes.SHA256())
-            digest.update('HardPassword123'.encode('utf-8'))
+            digest.update('PasswordHard321'.encode('utf-8'))
             pass_hash = digest.finalize()
             db.update({user: base64.standard_b64encode(pass_hash).decode('utf-8')})
 
