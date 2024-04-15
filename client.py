@@ -63,16 +63,15 @@ class Client(Node):
         print(f"Shared key with KDC: {self.keys['kdc']}")
 
         # check timestamp
-        try
-        if self.decrypt_check_time(sign_in_response['iv'], sign_in_response['time'], self.keys['kdc'][0]):
-            print("timestamp valid, proceed with authentication")
-        else:
-            print("timestamp invalid, aborting authentication")
-            print("attempt to login again")
-            # move this into helper
-            self.username = input("Enter your username:")
-            self.password = input("Enter your password:")
-            self.sign_in()
+        try:
+            if self.decrypt_check_time(sign_in_response['iv'], sign_in_response['time'], self.keys['kdc'][0]):
+                print("Timestamp valid, proceed with authentication")
+            else:
+                print("Timestamp invalid, Attempt to login again")
+                return self.reset_login()
+        except ValueError:
+            print("Incorrect password")
+            return self.reset_login()
 
         # encrypt timestamp challenge with the shared key
         bytes_timestamp = int(time.time()).to_bytes(32, 'big')
@@ -81,7 +80,6 @@ class Client(Node):
 
         # send challenge to KDC
         self.send(self.server_sock, 'SIGN-IN', iv=iv, time=challenge, protocol_step='init-chal-resp')
-        # FIXME: should entire message be encrypted or just challenge?
 
         # receive tgt response
         tgt_response = self.receive(self.server_sock)
@@ -99,6 +97,12 @@ class Client(Node):
             else:
                 print("too slow! timestamp invalid, aborting authentication")
 
+    def reset_login(self):
+        self.keys.clear()
+        self.username = input("Enter your username: ")
+        self.password = input("Enter your password: ")
+        return self.sign_in()
+
     def receive(self, socket):
         packet_raw = socket.recv(1024)
         if packet_raw:
@@ -109,26 +113,31 @@ class Client(Node):
     def process_command(self, user_input):
         parsed_input = user_input.readline().strip().split(' ', 2)
         command = parsed_input[0]
-        if command == 'LOGOUT':
-            self.send(self.server_sock, ...)
-        elif command == 'LIST':
+        if command == 'logout':
+            logout_message, iv = self.encrypt_list([self.username, time.time()], self.keys['kdc'][0])
+            self.send(self.server_sock, "LOGOUT", message=logout_message, iv=iv)
+            response = self.receive(self.server_sock)
+            print(response['content'])
+            return exit(0)
+        elif command == 'list':
             self.send(self.server_sock, 'LIST')
             resp = self.receive(self.server_sock)
             if resp:
                 print(f"Signed in users: {', '.join(resp['users'])}")
             else:
                 print("KDC did not respond to LIST request")
-        elif command == 'MESSAGE':
+        elif command == 'send':
             _, dest_user, message_content = parsed_input
             # check if we can straight up send a message to a user that is already authed
-            if (dest_user in self.keys and self.check_time(self.keys[dest_user][1], length=3000)
-                    and self.keys[dest_user][0]) and self.user_socks[dest_user]:
+            if (dest_user in self.keys and self.check_time(self.keys[dest_user][1], timeout=3000)
+                and self.keys[dest_user][0]) and self.user_socks[dest_user]:
 
                 # already authenticated with dest user, so we can send message directly
                 iv = os.urandom(16)
                 print("HELLO")
+                print(type(self.keys[dest_user][0]))
                 print(self.keys[dest_user][0])
-                ciphertext = self.encrypt(iv, message_content, self.keys[dest_user][0])
+                ciphertext = self.encrypt(iv, self.keys[dest_user][0], message_content.encode('utf-8'))
                 self.send(self.user_socks[dest_user], 'MESSAGE', message=ciphertext, iv=iv)
             else:
                 # check that we actually have a TGT to get Ticket-to-client
@@ -154,7 +163,7 @@ class Client(Node):
                             = self.decrypt_list(kdc_resp['key_info'], kdc_resp['key_info_iv'], self.keys['kdc'][0])
 
                         bytes_key_ab = base64.standard_b64decode(key_ab)
-
+                        print("KEY_AB: ", key_ab, "\nbytes_key_ab: ", bytes_key_ab)
                         # store key_ab in keys dict
                         self.keys[dest_user] = (bytes_key_ab, key_ab_exp)
 
@@ -201,8 +210,11 @@ class Client(Node):
             print("Stopping server...")
         finally:
             # close all sockets
+            for key in self.user_socks:
+                self.user_socks[key].close()
             self.sel.close()
-            # self.listen_sock.close()
+            self.listen_sock.close()
+            self.server_sock.close()
 
     # Read the client's query and respond accordingly.
     def service_client(self, key, mask):
@@ -229,7 +241,6 @@ class Client(Node):
                 #       f"{json_data['content']}")
 
     def delegate_request(self, c_socket, json_request):
-        print("in delegate request", json_request)
         # if we are receiving a new message request from another client
         if json_request['type'] == 'MSG-REQ':
             # decrypt ticket to me
@@ -239,9 +250,10 @@ class Client(Node):
                                                                                          self.keys['kdc'][0])
 
             bytes_shared_key = base64.standard_b64decode(shared_key)
+            # print("TICKET-TO-ME: shared-key: ", shared_key, "\nbytes_shared_key", bytes_shared_key)
 
             # check if ticket-to-me is valid, and if shared key is still valid
-            if self.check_time(ttb_exp) and self.check_time(shared_key_exp, length=3000):
+            if self.check_time(ttb_exp) and self.check_time(shared_key_exp, timeout=3000):
                 # FIXME: check if shared_key is expired
                 # store shared key in keys dict
                 self.keys[ttb_user] = (bytes_shared_key, shared_key_exp)
@@ -252,10 +264,23 @@ class Client(Node):
 
                 # check if message time is valid, usernames from ttb and message match
                 if self.check_time(ts) and ttb_user == msg_user:
-                    self.user_socks[msg_user] = c_socket
+                    dest_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    dest_sock.connect((user_addr[0], user_addr[1]))
+                    self.user_socks[msg_user] = dest_sock
 
                     # display message
                     print(f"<From {msg_user}>: {message}")
+        if json_request['type'] == 'MESSAGE':
+            # decrypt message
+            message, iv = json_request['message'], json_request['iv']
+
+            base64_message = base64.standard_b64decode(message)
+            base64_iv = base64.standard_b64decode(iv)
+
+            if json_request['src'] in self.keys and self.keys[json_request['src']][0]:
+                decrypted_message = self.decrypt(base64_iv, self.keys[json_request['src']][0], base64_message).decode(
+                    'utf-8')
+                print(f"Received message: {decrypted_message}")
 
 
 if __name__ == "__main__":
@@ -268,7 +293,7 @@ if __name__ == "__main__":
                     config_file["CLIENT_PORT"],
                     config_file["KDC_HOST"],
                     config_file["KDC_PORT"],
-                    username,
+                    username.lower(),
                     password)
     client.run_client()
 

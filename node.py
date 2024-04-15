@@ -12,7 +12,6 @@ import math
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-
 p = 1299827
 
 
@@ -46,8 +45,7 @@ class Node:
 
     def encrypt_list(self, plain_list, key):
         iv = os.urandom(16)
-        # FIXME: what's a more efficient way to do this
-        content = str(plain_list).replace("\'", "\"").replace("(", "[").replace(")", "]")
+        content = json.dumps(plain_list)
         encrypted = self.encrypt(iv, key, content.encode('utf-8'))
         return encrypted, iv
 
@@ -55,11 +53,9 @@ class Node:
         encrypted_list_bytes = base64.standard_b64decode(encrypted_list)
         iv_bytes = base64.standard_b64decode(iv)
         decrypted_plain_list = self.decrypt(iv_bytes, key, encrypted_list_bytes).decode('utf-8')
-        print("decrypted plain list: ", decrypted_plain_list, type(decrypted_plain_list))
-        # decoded = decrypted_plain_list.decode('utf-8')
-        # print(decoded)
+        # print("decrypted plain list: ", decrypted_plain_list, type(decrypted_plain_list))
+
         return json.loads(decrypted_plain_list)
-        # return decrypted_plain_list
 
     def send(self, dest_sock, msg_type, **content):
         json_request = {
@@ -69,12 +65,10 @@ class Node:
         }
         for label, value in content.items():
             if isinstance(value, bytes):
-                if label == 'tgt':
-                    print("TGT was byte and now encoded base64")
                 json_request[label] = base64.standard_b64encode(value).decode('utf-8')
             else:
                 json_request[label] = value
-        print(f"Sending message: {json_request}")
+        # print(f"Sending message: {json_request}")
         dest_sock.send(json.dumps(json_request).encode('utf-8'))
 
     def hash_and_diffie_hellman(self, password, random):
@@ -108,8 +102,9 @@ class Node:
         plaintext = unpadder.update(padded_bytes) + unpadder.finalize()
         return plaintext
 
-    def check_time(self, ts, length=300):
-        return length > abs(ts - time.time())
+    def check_time(self, ts, timeout=300):
+        current_time = time.time()
+        return current_time > ts and timeout > abs(ts - current_time)
 
     def decrypt_check_time(self, iv, challenge, key):
         iv_bytes = base64.standard_b64decode(iv)

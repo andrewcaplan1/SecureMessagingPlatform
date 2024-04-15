@@ -29,7 +29,6 @@ class KDC(Node):
 
         print("KDC Server Initialized...")
 
-
     # Main method, continuously accepts new sign-on requests and responds to existing
     # clients' queries.
     def run_server(self):
@@ -56,6 +55,7 @@ class KDC(Node):
                         self.service_client(key, mask)
         except KeyboardInterrupt:
             print("Stopping server...")
+            self.listen_sock.close()
         finally:
             # close all sockets
             self.sel.close()
@@ -78,14 +78,14 @@ class KDC(Node):
                 c_socket.close()
             else:
                 received_json_data = json.loads(recv_data.decode('utf-8'))
-                print(received_json_data)
+                # print(received_json_data)
                 self.delegate_request(c_socket, received_json_data)
 
     # What is the query asking? Respond accordingly and tell the user if the action is
     # successful or not.
     def delegate_request(self, c_socket, json_request):
         src_usr = json_request['src']
-        print(f"KDC received request '{json_request['type']}' from '{src_usr}'")
+        # print(f"KDC received request '{json_request['type']}' from '{src_usr}'")
 
         # handle sign-in request
         if json_request['type'] == 'SIGN-IN':
@@ -110,8 +110,17 @@ class KDC(Node):
 
         elif json_request['type'] == 'LIST':
             # check authentication status, return response accordingly
-            if self.user_info[src_usr]['status'] == 'authenticated':
+            if src_usr in self.user_info and self.user_info[src_usr]['status'] == 'authenticated':
                 self.send(c_socket, 'LIST', users=list(self.user_info.keys()))
+            else:
+                self.send(c_socket, 'ERROR', content='User not authenticated')
+
+        elif json_request['type'] == 'LOGOUT':
+            if src_usr in self.user_info:
+                del self.user_info[src_usr]
+                self.send(c_socket, 'LOGOUT', content='Successfully logged out')
+            else:
+                self.send(c_socket, 'ERROR', content='User not authenticated')
         else:
             # unsupported request type
             self.send(c_socket, 'ERROR', content='Request type must be SIGN-IN, MSG-AUTH, or LIST')
@@ -120,14 +129,14 @@ class KDC(Node):
     def message_auth(self, c_socket, tgt, tgt_iv, content, content_iv, src_usr):
         # [src_usr, c_socket.getpeername(), time.time() + 3000]
         tgt_list = self.decrypt_list(tgt, tgt_iv, self.master_key)
-        print(tgt_list)
+        # print(tgt_list)
 
         # check tgt for validity
         if tgt_list[0] != src_usr:
-            print("tgt username does not match src_usr")
+            # print("tgt username does not match src_usr")
             self.send(c_socket, 'ERROR', content='tgt username does not match src_usr')
         elif tgt_list[1] != list(c_socket.getpeername()):
-            print("tgt address does not match client address")
+            # print("tgt address does not match client address")
             self.send(c_socket, 'ERROR', content='tgt address does not match client address')
         elif tgt_list[2] < time.time():
             print("tgt expired")
@@ -147,10 +156,12 @@ class KDC(Node):
                 # create ticket-to-B
                 session_key_ab = os.urandom(32)
                 base64_session_key_ab = base64.standard_b64encode(session_key_ab).decode('utf-8')
+
                 kab_expiration = time.time() + 3000
 
                 # [username, sender_address, expiration of ttb, session_key Kab, expiration Kab]
-                ttb = [src_usr, c_socket.getpeername(), time.time() + 300, base64_session_key_ab, kab_expiration]
+                ttb = [src_usr, self.user_info[src_usr]["address"], time.time() + 300, base64_session_key_ab,
+                       kab_expiration]
                 encrypted_ttb, ttb_iv = self.encrypt_list(ttb, self.user_info[dest_user]['shared_key'])
 
                 key_info = [dest_user, self.user_info[dest_user]['address'], base64_session_key_ab,
@@ -169,25 +180,22 @@ class KDC(Node):
         if user in db:
             return db[user]
         else:
-            # TODO: delete this password thingy
-            print("user not in database, making their password HardPasssord123")
-            digest = hashes.Hash(hashes.SHA256())
-            digest.update('PasswordHard321'.encode('utf-8'))
-            pass_hash = digest.finalize()
-            db.update({user: base64.standard_b64encode(pass_hash).decode('utf-8')})
-
-        with open('kdc_database.json', "w") as jsonFile:
-            json.dump(db, jsonFile)
-
-        return db[user]
+            return None
 
     # Signs into the server with this client's username.
     def sign_in_response(self, c_socket, src_usr, json_request):
-        print("in sign in response (in KDC): ", json_request)
+        if src_usr in self.user_info and self.user_info[src_usr]["status"] == "authenticated":
+            print("User already authenticated, logout first")
+            self.send(c_socket, 'ERROR', content='User already authenticated, logout first')
+            return
 
         # compute KDC side of DH
         dh_private = int.from_bytes(os.urandom(2048), 'big')  # a
         base64_pw_hash = self.get_user_pw_hash(src_usr)
+
+        if base64_pw_hash is None:
+            print("User not in database, try again with real credentials")
+            self.send(c_socket, 'ERROR', content='message timestamp bad')
 
         user_pw_hash = int.from_bytes(base64.standard_b64decode(base64_pw_hash), 'big')
 
@@ -196,7 +204,6 @@ class KDC(Node):
         # compute shared session key
         other_half = json_request['half_key']
         shared_key = (pow(other_half, dh_private, p)).to_bytes(32, 'big')
-        print("shared key: ", shared_key)
         iv = os.urandom(16)  # initialization vector for CBC mode
 
         # store user's authentication state
@@ -209,7 +216,7 @@ class KDC(Node):
                 "shared_key_exp": time.time() + 3000
             }
         else:
-            self.user_info["address"] = json_request['listen_sock']
+            self.user_info[src_usr]["address"] = json_request['listen_sock']
             self.user_info[src_usr]["last_step_received"] = "init-auth-req"
             self.user_info[src_usr]["shared_key"] = shared_key
             self.user_info[src_usr]["status"] = "unauthenticated"
@@ -228,39 +235,39 @@ class KDC(Node):
         # get shared key
         if src_usr not in self.user_info:
             print("User has not begun authentication process, restart and try again")
-            sys.exit(1)
+            # sys.exit(1)
         elif (self.user_info[src_usr]["last_step_received"] == "init-auth-req"
               and json_request['protocol_step'] == "init-chal-resp"):
 
             shared_key = self.user_info[src_usr]["shared_key"]
 
-            # check timestamp
-            if self.decrypt_check_time(json_request['iv'], json_request['time'], shared_key):
-                print("Timestamp valid, proceed with authentication")
+            try:
+                # check timestamp
+                if self.decrypt_check_time(json_request['iv'], json_request['time'], shared_key):
+                    # prove knowledge
+                    bytes_timestamp = int(time.time()).to_bytes(32, 'big')
+                    ts_iv = os.urandom(16)
+                    encrypted_timestamp = self.encrypt(ts_iv, self.user_info[src_usr]['shared_key'], bytes_timestamp)
 
-                # prove knowledge
-                bytes_timestamp = int(time.time()).to_bytes(32, 'big')
-                ts_iv = os.urandom(16)
-                encrypted_timestamp = self.encrypt(ts_iv, self.user_info[src_usr]['shared_key'], bytes_timestamp)
+                    tgt_list = [src_usr, c_socket.getpeername(), time.time() + 3000]
+                    tgt, tgt_iv = self.encrypt_list(tgt_list, self.master_key)
 
-                # create TGT for user
-                # tgt_iv = os.urandom(16)
-                # content = str([src_usr, c_socket.getpeername(), time.time() + 3000])
-                # tgt = self.encrypt(tgt_iv, self.master_key, content.encode('utf-8'))
+                    print(f'User {src_usr} authenticated!')
+                    self.send(c_socket, 'SIGN-IN', tgt=tgt, tgt_iv=tgt_iv, time=encrypted_timestamp, iv=ts_iv,
+                              protocol_step='init-final')
 
-                tgt_list = [src_usr, c_socket.getpeername(), time.time() + 3000]
-                tgt, tgt_iv = self.encrypt_list(tgt_list, self.master_key)
+                    self.user_info[src_usr]["status"] = "authenticated"
+                    self.user_info[src_usr]["last_step_received"] = json_request['protocol_step']
+                    self.user_info[src_usr]["auth_time"] = time.time()
 
-                self.send(c_socket, 'SIGN-IN', tgt=tgt, tgt_iv=tgt_iv, time=encrypted_timestamp, iv=ts_iv,
-                          protocol_step='init-final')
-
-                self.user_info[src_usr]["status"] = "authenticated"
-                self.user_info[src_usr]["last_step_received"] = "init-chal_resp"
-                self.user_info[src_usr]["auth_time"] = time.time()
-
-            else:
-                print("Timestamp invalid, aborting authentication")
-                self.send(c_socket, 'ERROR', content='Out of date timestamp')
+                else:
+                    print("Timestamp invalid, aborting authentication")
+                    self.send(c_socket, 'ERROR', content='Out of date timestamp')
+            except ValueError:
+                print("Incorrect password")
+                del self.user_info[src_usr]
+        else:
+            print("Bad protocol step order, try again")
 
 
 if __name__ == "__main__":
