@@ -1,17 +1,23 @@
-# SecureMessagingPlatform
+# Secure Messaging Platform
 
-
-List of valid message types:
-- LIST
-- SIGN-IN
-- MESSAGE
+SPEKE for password based authentication and Kerberos for session key distribution.
 
 users:
 Andrew: HardPassword123
 Amanda: PasswordHard321
 
+Message types recognized by the KDC:
+- SIGN-IN, for client authentication
+- LIST, for listing online users
+- MSG-AUTH, for establishing shared client keys
+- MESSAGE, for sending messages between clients
 
-Known Issues
+
+
+
+
+
+## Known Issues
 - issue with [p, 2-p] small something attack from wikipedia
 - if client-client messages are received out of order, destination user won't receive ticket-to-B
 - if implementing client registration, need to make sure no one can register with the name 'kdc'
@@ -23,19 +29,33 @@ put username and password
 WS calculates W and stores it
 WS chooses a and stores it
 
-Init-auth-req
-WS—>KDC : A, W^a mod p
+## Protocol
+
+### Assumptions
+
+Assume that the KDC has a list of registered users and their hashed passwords.
+
+- A is Alice's username
+- a is Alice's randomly generated Diffie-Hellman secret
+- m is the KDC's randomly generated Diffie-Hellman secret
+- a and m are forgotten after the Diffie-Hellman exchange (step 3)
+- p is the public safe prime 1299827
+- W is Alice's password
+- g is SHA-256(W)<sup>2</sup>
 
 —————————
 
-KDC receives init-auth-req
-KDC calculates W for that user and stores it
-KDC chooses m and stores it
-KDC computes SA-KDC = (Wa mod p)m mod p
-KDC stores SA-KDC
-KDC forgets W,m
+1. init-auth-req
+WS—>KDC : A, W<sup>a</sup> mod p
+
+2. init-auth-resp
+KDC → WS: W<sup>m</sup> mod p, SA-KDC{C1, timestamp}
+
+3. Both calculate and store the shared key: S<sub>A-KDC</sub> = W<sup>a*m</sup> mod p
+
+4. 
 KDC creates Challenge 1 (C1), and stores it
-**come back to this: abort if value received is not in range [2,p-2]**
+
 
 Init-auth-resp
 KDC → WS: Wm mod p, SA-KDC{C1, timestamp}

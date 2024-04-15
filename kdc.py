@@ -4,7 +4,9 @@ import selectors
 import time
 from node import Node, p
 import os
+import socket
 import sys
+import signal
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 import base64
@@ -25,9 +27,12 @@ class KDC(Node):
         #     # "shared_key_expiration": "time of key gen + 20 min or so?",
         #     "shared_key": shared_key
         # }
+        # self.listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
         self.master_key = os.urandom(32)  # for encrypting TGTs
 
         print("KDC Server Initialized...")
+
 
     # Main method, continuously accepts new sign-on requests and responds to existing
     # clients' queries.
@@ -72,14 +77,13 @@ class KDC(Node):
             # received no data --> bail out because client closed socket
             if not recv_data:
                 print(f"Closing connection to {c_data.addr}")
+                # FIXME: remove username from user_info, don't want to grant others ttb's
                 self.sel.unregister(c_socket)
                 c_socket.close()
             else:
                 received_json_data = json.loads(recv_data.decode('utf-8'))
                 print(received_json_data)
                 self.delegate_request(c_socket, received_json_data)
-                # response = json.dumps(self.delegate_request(c_socket, received_json_data)).encode('utf-8')
-                # c_data.outb += response
 
     # What is the query asking? Respond accordingly and tell the user if the action is
     # successful or not.
@@ -103,29 +107,21 @@ class KDC(Node):
         elif json_request['type'] == 'MSG-AUTH':
             # checks if user is authenticated already
             if src_usr in self.user_info and self.user_info[src_usr]["status"] == "authenticated":
-                self.message_auth(c_socket, json_request['tgt'], json_request['tgt_iv'], json_request['iv'],
-                                  json_request['content'], src_usr)
+                self.message_auth(c_socket, json_request['tgt'], json_request['tgt_iv'],
+                                  json_request['content'], json_request['content_iv'], src_usr)
             else:
                 self.send(c_socket, 'ERROR', content='Must authenticate first')
 
         elif json_request['type'] == 'LIST':
             # check authentication status, return response accordingly
-            if self.user_info['src'] == 'authenticated':
-                self.send(c_socket, 'LIST', users=self.user_info.keys())
-
+            if self.user_info[src_usr]['status'] == 'authenticated':
+                self.send(c_socket, 'LIST', users=list(self.user_info.keys()))
         else:
             # unsupported request type
             self.send(c_socket, 'ERROR', content='Request type must be SIGN-IN, MSG-AUTH, or LIST')
 
-        # FIXME: need outb?
-        # return response
-
     # TGT --> ticket-to-B
-    def message_auth(self, c_socket, tgt, tgt_iv, shared_iv, content, src_usr):
-
-        # tgt_bytes = base64.standard_b64decode(tgt)
-        # tgt_iv_bytes = base64.standard_b64decode(tgt_iv)
-        # tgt_text = self.decrypt(tgt_iv_bytes, self.master_key, tgt_bytes).decode('utf-8')
+    def message_auth(self, c_socket, tgt, tgt_iv, content, content_iv, src_usr):
         # [src_usr, c_socket.getpeername(), time.time() + 3000]
         tgt_list = self.decrypt_list(tgt, tgt_iv, self.master_key)
         print(tgt_list)
@@ -134,7 +130,7 @@ class KDC(Node):
         if tgt_list[0] != src_usr:
             print("tgt username does not match src_usr")
             self.send(c_socket, 'ERROR', content='tgt username does not match src_usr')
-        elif tgt_list[1] != c_socket.getpeername():
+        elif tgt_list[1] != list(c_socket.getpeername()):
             print("tgt address does not match client address")
             self.send(c_socket, 'ERROR', content='tgt address does not match client address')
         elif tgt_list[2] < time.time():
@@ -142,7 +138,7 @@ class KDC(Node):
             self.send(c_socket, 'ERROR', content='tgt expired')
         else:
             # tgt is ok
-            dest_user, timestamp = self.decrypt_list(content, shared_iv, self.user_info[src_usr]['shared_key'])
+            dest_user, timestamp = self.decrypt_list(content, content_iv, self.user_info[src_usr]['shared_key'])
 
             # check if user is authenticated
             if self.user_info[dest_user]['status'] != 'authenticated':
@@ -154,19 +150,20 @@ class KDC(Node):
             else:
                 # create ticket-to-B
                 session_key_ab = os.urandom(32)
+                base64_session_key_ab = base64.standard_b64encode(session_key_ab).decode('utf-8')
                 kab_expiration = time.time() + 3000
 
                 # [username, sender_address, expiration of ttb, session_key Kab, expiration Kab]
-                ttb = [src_usr, c_socket.getpeername(), time.time() + 300, session_key_ab, kab_expiration]
+                ttb = [src_usr, c_socket.getpeername(), time.time() + 300, base64_session_key_ab, kab_expiration]
                 encrypted_ttb, ttb_iv = self.encrypt_list(ttb, self.user_info[dest_user]['shared_key'])
 
-                key_info = [dest_user, self.user_info[dest_user]['address'], session_key_ab,
+                key_info = [dest_user, self.user_info[dest_user]['address'], base64_session_key_ab,
                             kab_expiration, time.time()]
 
                 encrypted_key_info, key_info_iv = self.encrypt_list(key_info,
                                                                     self.user_info[src_usr]['shared_key'])
 
-                self.send(c_socket, 'MSG-AUTH', ttb=ttb, ttb_iv=ttb_iv, key_info=encrypted_key_info,
+                self.send(c_socket, 'MSG-AUTH', ttb=encrypted_ttb, ttb_iv=ttb_iv, key_info=encrypted_key_info,
                           key_info_iv=key_info_iv)
 
         # KDC validates TGT (also makes sure B is logged in and authenticated)
@@ -178,9 +175,7 @@ class KDC(Node):
         with open('kdc_database.json', "r") as jsonFile:
             db = json.load(jsonFile)
 
-        print(db)
         if user in db:
-            print("USER IN DATABASE: ", user, db[user])
             return db[user]
         else:
             # TODO: delete this password thingy
@@ -216,19 +211,19 @@ class KDC(Node):
         # store user's authentication state
         if src_usr not in self.user_info:
             self.user_info[src_usr] = {
-                "address": c_socket.getpeername(),
+                "address": json_request['listen_sock'],
                 "last_step_received": "init-auth-req",
                 "status": "unauthenticated",
-                # "shared_key_expiration": "time of key gen + 20 min or so?",
-                "shared_key": shared_key
+                "shared_key": shared_key,
+                "shared_key_exp": time.time() + 3000
             }
         else:
-            self.user_info["address"] = c_socket.getpeername()
+            self.user_info["address"] = json_request['listen_sock']
             self.user_info[src_usr]["last_step_received"] = "init-auth-req"
             self.user_info[src_usr]["shared_key"] = shared_key
             self.user_info[src_usr]["status"] = "unauthenticated"
-            # self.user_info[src_usr]["shared_key_expiration"] = "new expiration"
-            
+            self.user_info[src_usr]["shared_key_expiration"] = time.time() + 3000
+
         # encrypt timestamp with shared key
         bytes_timestamp = int(time.time()).to_bytes(32, 'big')
         encrypted_timestamp = self.encrypt(iv, shared_key, bytes_timestamp)
@@ -236,11 +231,9 @@ class KDC(Node):
         encrypted_challenge = self.encrypt(iv, shared_key, challenge)
 
         self.send(c_socket, 'SIGN-IN', half_key=half_key, time=encrypted_timestamp, chal=encrypted_challenge,
-                  iv=iv, protocol_step='init-auth-resp')
+                  iv=iv, protocol_step='init-auth-resp', key_exp=self.user_info[src_usr]['shared_key_exp'])
 
     def challenge_response(self, c_socket, src_usr, json_request):
-        print("in challenge response (in KDC): ", json_request)
-
         # get shared key
         if src_usr not in self.user_info:
             print("User has not begun authentication process, restart and try again")
@@ -260,10 +253,13 @@ class KDC(Node):
                 encrypted_timestamp = self.encrypt(ts_iv, self.user_info[src_usr]['shared_key'], bytes_timestamp)
 
                 # create TGT for user
-                tgt_iv = os.urandom(16)
-                content = str([src_usr, c_socket.getpeername(), time.time() + 3000])
-                tgt = self.encrypt(tgt_iv, self.master_key, content.encode('utf-8'))
-                
+                # tgt_iv = os.urandom(16)
+                # content = str([src_usr, c_socket.getpeername(), time.time() + 3000])
+                # tgt = self.encrypt(tgt_iv, self.master_key, content.encode('utf-8'))
+
+                tgt_list = [src_usr, c_socket.getpeername(), time.time() + 3000]
+                tgt, tgt_iv = self.encrypt_list(tgt_list, self.master_key)
+
                 self.send(c_socket, 'SIGN-IN', tgt=tgt, tgt_iv=tgt_iv, time=encrypted_timestamp, iv=ts_iv,
                           protocol_step='init-final')
 
@@ -280,5 +276,5 @@ if __name__ == "__main__":
     with open('config.json') as f:
         server_info = json.load(f)
 
-    kdc = KDC(server_info["KDC_HOST"], server_info["KDC_PORT"])
-    kdc.run_server()
+        kdc = KDC(server_info["KDC_HOST"], server_info["KDC_PORT"])
+        kdc.run_server()

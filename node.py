@@ -33,22 +33,21 @@ class Node:
         # register this as a listening socket, monitor with sel.select()
         self.sel.register(self.listen_sock, selectors.EVENT_READ)
 
-        self.user_socks = {}  # map of username to socket
-
     def register_client(self, c_socket):
         connect, address = c_socket.accept()
         print(f"Received connection from {address}")
         connect.setblocking(False)  # to avoid BlockingIOError
 
         # wrap data in SimpleNamespace class
-        data = types.SimpleNamespace(addr=address, inb=b"", outb=b"")
+        data = types.SimpleNamespace(addr=address)
         # we use bitwise OR because we want to know when conn is ready for reading and writing
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         self.sel.register(connect, events, data=data)
 
     def encrypt_list(self, plain_list, key):
         iv = os.urandom(16)
-        content = str(plain_list)
+        # FIXME: what's a more efficient way to do this
+        content = str(plain_list).replace("\'", "\"").replace("(", "[").replace(")", "]")
         encrypted = self.encrypt(iv, key, content.encode('utf-8'))
         return encrypted, iv
 
@@ -56,7 +55,11 @@ class Node:
         encrypted_list_bytes = base64.standard_b64decode(encrypted_list)
         iv_bytes = base64.standard_b64decode(iv)
         decrypted_plain_list = self.decrypt(iv_bytes, key, encrypted_list_bytes).decode('utf-8')
+        print("decrypted plain list: ", decrypted_plain_list, type(decrypted_plain_list))
+        # decoded = decrypted_plain_list.decode('utf-8')
+        # print(decoded)
         return json.loads(decrypted_plain_list)
+        # return decrypted_plain_list
 
     def send(self, dest_sock, msg_type, **content):
         json_request = {
@@ -74,7 +77,6 @@ class Node:
         print(f"Sending message: {json_request}")
         dest_sock.send(json.dumps(json_request).encode('utf-8'))
 
-    # SPEKE!
     def hash_and_diffie_hellman(self, password, random):
         digest = hashes.Hash(hashes.SHA256())
         digest.update(password.encode('utf-8'))
@@ -84,7 +86,6 @@ class Node:
         g = pow(pass_hash, 2, p)  # hash(w)^2 mod p
         return pow(g, random, p)  # g^a mod p
 
-    # SPEKE!
     def half_diffie_hellman(self, pass_hash, random):
         # digest = hashes.Hash(hashes.SHA256())
         # digest.update(password.encode('utf-8'))
@@ -112,16 +113,14 @@ class Node:
         unpadder = padding.PKCS7(128).unpadder()
 
         padded_bytes = decryptor.update(encrypted_padded_bytes) + decryptor.finalize()
-        print(padded_bytes)
         plaintext = unpadder.update(padded_bytes) + unpadder.finalize()
         return plaintext
 
-    def check_time(self, ts):
-        return 300 > abs(ts - time.time())
+    def check_time(self, ts, length=300):
+        return length > abs(ts - time.time())
 
     def decrypt_check_time(self, iv, challenge, key):
         iv_bytes = base64.standard_b64decode(iv)
         challenge_bytes = base64.standard_b64decode(challenge)
         decrypted_timestamp = self.decrypt(iv_bytes, key, challenge_bytes)
-        # return 300 > abs(int.from_bytes(decrypted_timestamp, 'big') - int(time.time()))
         return self.check_time(int.from_bytes(decrypted_timestamp, 'big'))
