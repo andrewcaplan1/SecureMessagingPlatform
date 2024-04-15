@@ -1,3 +1,4 @@
+import subprocess
 from client import Client
 from kdc import KDC
 
@@ -9,16 +10,16 @@ BOB_PORT = 55002
 
 def test_simple():
     kdc = KDC(LOCAL_HOST, KDC_PORT)
-    alice = Client(LOCAL_HOST, ALICE_PORT, LOCAL_HOST, KDC_PORT,
-                   'alice', 'supersecurepassword')
-    bob = Client(LOCAL_HOST, BOB_PORT, LOCAL_HOST, KDC_PORT,
-                 'bob', 'bobisthebest')
+    # alice = Client(LOCAL_HOST, ALICE_PORT, LOCAL_HOST, KDC_PORT,
+    #                'alice', 'supersecurepassword')
+    # bob = Client(LOCAL_HOST, BOB_PORT, LOCAL_HOST, KDC_PORT,
+    #              'bob', 'bobisthebest')
 
-    kdc_thread = threading.Thread(target=kdc.run_server, args=(1,))
-    alice_thread = threading.Thread(target=alice.run_server, args=(1,))
-    bob_thread = threading.Thread(target=bob.run_server, args=(1,))
+    k_result = subprocess.run(['python3', 'kdc.py'], capture_output=True, text=True)
+    k_result.run()
 
-    bob.run_client(bob_input)
-
-
-
+    a_result = subprocess.Popen(['python3', 'client.py'], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+    a_result.communicate('')
+    print("HELLOOO")
+    print(k_result.stdout)

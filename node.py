@@ -81,17 +81,9 @@ class Node:
         digest = hashes.Hash(hashes.SHA256())
         digest.update(password.encode('utf-8'))
         pass_hash = int.from_bytes(digest.finalize(), 'big')
-        # https://datatracker.ietf.org/doc/rfc3526/?include_text=1
-        # p = int(2 ** 2048 - 2 ** 1984 - 1 + 2 ^ 64 * ((2 ** 1918 * math.pi) + 124476))
-        g = pow(pass_hash, 2, p)  # hash(w)^2 mod p
-        return pow(g, random, p)  # g^a mod p
+        return self.half_diffie_hellman(pass_hash, random)
 
     def half_diffie_hellman(self, pass_hash, random):
-        # digest = hashes.Hash(hashes.SHA256())
-        # digest.update(password.encode('utf-8'))
-        # pass_hash = int.from_bytes(digest.finalize(), 'big')
-        # https://datatracker.ietf.org/doc/rfc3526/?include_text=1
-        # p = int(2 ** 2048 - 2 ** 1984 - 1 + 2 ^ 64 * ((2 ** 1918 * math.pi) + 124476))
         g = pow(pass_hash, 2, p)  # hash(w)^2 mod p
         return pow(g, random, p)  # g^a mod p
 

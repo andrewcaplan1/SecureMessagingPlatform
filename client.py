@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
-import math
 import selectors
 import socket
 import json
 import os
-import subprocess
 import sys
 import time
 import base64
 import io
-
-from cryptography.hazmat.primitives import hashes, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from node import Node, p
 
@@ -68,6 +63,7 @@ class Client(Node):
         print(f"Shared key with KDC: {self.keys['kdc']}")
 
         # check timestamp
+        try
         if self.decrypt_check_time(sign_in_response['iv'], sign_in_response['time'], self.keys['kdc'][0]):
             print("timestamp valid, proceed with authentication")
         else:
@@ -81,7 +77,7 @@ class Client(Node):
         # encrypt timestamp challenge with the shared key
         bytes_timestamp = int(time.time()).to_bytes(32, 'big')
         iv = os.urandom(16)  # initialization vector for CBC mode
-        challenge = self.encrypt(iv, self.keys['kdc'][0], bytes_timestamp)  # encrypts timestamp with
+        challenge = self.encrypt(iv, self.keys['kdc'][0], bytes_timestamp)
 
         # send challenge to KDC
         self.send(self.server_sock, 'SIGN-IN', iv=iv, time=challenge, protocol_step='init-chal-resp')
@@ -119,7 +115,7 @@ class Client(Node):
             self.send(self.server_sock, 'LIST')
             resp = self.receive(self.server_sock)
             if resp:
-                print(f"Signed In Users: {', '.join(resp['users'])}")
+                print(f"Signed in users: {', '.join(resp['users'])}")
             else:
                 print("KDC did not respond to LIST request")
         elif command == 'MESSAGE':

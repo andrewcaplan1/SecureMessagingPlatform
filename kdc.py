@@ -4,11 +4,8 @@ import selectors
 import time
 from node import Node, p
 import os
-import socket
 import sys
-import signal
-from cryptography.hazmat.primitives import hashes, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hashes
 import base64
 
 
@@ -27,7 +24,6 @@ class KDC(Node):
         #     # "shared_key_expiration": "time of key gen + 20 min or so?",
         #     "shared_key": shared_key
         # }
-        # self.listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         self.master_key = os.urandom(32)  # for encrypting TGTs
 
@@ -165,11 +161,6 @@ class KDC(Node):
 
                 self.send(c_socket, 'MSG-AUTH', ttb=encrypted_ttb, ttb_iv=ttb_iv, key_info=encrypted_key_info,
                           key_info_iv=key_info_iv)
-
-        # KDC validates TGT (also makes sure B is logged in and authenticated)
-        # KDC creates new session key KAB between A and B
-        # SB-KDC {A, timestamp, ticket-to-B-expiration, KAB, KAB-expiration}
-        # KDC → WS: Ticket-to-B=SB-KDC{A, TS, TTB-Expiration, KAB, KAB-Expiration}, SA-KDC{B, TS, KAB-Expiration, KAB}
 
     def get_user_pw_hash(self, user):
         with open('kdc_database.json', "r") as jsonFile:
