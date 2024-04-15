@@ -14,11 +14,10 @@ def test_simple():
     bob = Client(LOCAL_HOST, BOB_PORT, LOCAL_HOST, KDC_PORT,
                  'bob', 'bobisthebest')
 
-    kdc.run_server()
-    alice_input = ""
-    alice.run_client(alice_input)
+    kdc_thread = threading.Thread(target=kdc.run_server, args=(1,))
+    alice_thread = threading.Thread(target=alice.run_server, args=(1,))
+    bob_thread = threading.Thread(target=bob.run_server, args=(1,))
 
-    bob_input = ""
     bob.run_client(bob_input)
 
 

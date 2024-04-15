@@ -1,5 +1,0 @@
-FIXME: add legit username, hash, and salt
-
-bob:1cdffe48ff352b3ada87dda3c06eb45a2b086afa43249f59236fc1b92c54788a$QzutRyrAkzI
-coolboy84:af07fcd9c35898bb0a7122cc529f21b16f295bea059dd723fd7265a8f062de4b$l8czt5mG0TE
-lordpoo:c10fb354689a31657426e59331b4202b17949aad3959a23ebf0ae776813fd17e$z8kFlnLMelw

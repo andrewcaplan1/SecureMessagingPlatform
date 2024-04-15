@@ -37,7 +37,7 @@ KDC → WS: Wm mod p, SA-KDC{C1, timestamp}
 
 —————————
 
-WS receives Init-auth-resp
+WS receives init-auth-resp
 
 WS computes SA-KDC = (Wm mod p)a mod p
 WS stores SA-KDC
@@ -45,12 +45,12 @@ WS forgets W, a
 WS solves challenge C1
 WS creates Challenge 2 (C2), and stores it
 
-Init-chal-resp-1
+init-chal-resp-1
 WS → KDC: SA-KDC{C1, C2, timestamp}
 
 —————————
 
-KDC receives Init-chal-resp
+KDC receives init-chal-resp
 
 KDC validates C1 challenge response
 KDC solves challenge C2
